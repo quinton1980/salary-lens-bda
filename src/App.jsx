@@ -289,8 +289,8 @@ export default function App() {
                 { label: "Job Title", el: <input className="filter-input" placeholder="e.g. Accountant" value={search} onChange={e => setSearch(e.target.value)} /> },
                 { label: "Industry", el: <select className="filter-input" value={filterIndustry} onChange={e => setFilterIndustry(e.target.value)}><option value="">All Industries</option>{INDUSTRIES.map(i => <option key={i}>{i}</option>)}</select> },
                 { label: "Experience", el: <select className="filter-input" value={filterExp} onChange={e => setFilterExp(e.target.value)}><option value="">All Levels</option>{EXPERIENCE_LEVELS.map(l => <option key={l}>{l}</option>)}</select> },
-                { label: payTab === "annual" ? "Min Salary ($)" : "Min Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 50000" : "e.g. 20"} type="number" value={filterMin} onChange={e => setFilterMin(e.target.value)} /> },
-                { label: payTab === "annual" ? "Max Salary ($)" : "Max Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 120000" : "e.g. 100"} type="number" value={filterMax} onChange={e => setFilterMax(e.target.value)} /> },
+                { label: payTab === "annual" ? "Filter: Min Salary ($)" : "Filter: Min Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 50000" : "e.g. 20"} type="number" value={filterMin} onChange={e => setFilterMin(e.target.value)} /> },
+                { label: payTab === "annual" ? "Filter: Max Salary ($)" : "Filter: Max Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 120000" : "e.g. 100"} type="number" value={filterMax} onChange={e => setFilterMax(e.target.value)} /> },
               ].map(({ label, el }) => (
                 <div key={label}>
                   <div style={{ fontSize: "0.68rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "#666", fontFamily: "'DM Mono', monospace", marginBottom: "0.35rem" }}>{label}</div>
@@ -303,6 +303,9 @@ export default function App() {
               : loadError ? <div style={{ textAlign: "center", color: "#E07070", padding: "3rem", fontFamily: "'DM Mono', monospace" }}>{loadError}</div>
               : <>
                   <Stats entries={filtered} payType={payTab} />
+                  <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", padding: "0.7rem 1rem", marginBottom: "1rem", fontSize: "0.78rem", color: "#666", fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>
+                    💡 Each role shows the <span style={{ color: "#C9A84C" }}>average salary</span> plus a <span style={{ color: "#C9A84C" }}>range (lowest – highest)</span> calculated from all anonymous submissions. Use this as a baseline when negotiating your pay.
+                  </div>
                   {pendingCount > 0 && (
                     <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.15)", borderRadius: "8px", padding: "0.7rem 1rem", marginBottom: "1rem", fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>
                       {pendingCount} submission{pendingCount !== 1 ? "s" : ""} waiting — roles need {MIN_SUBMISSIONS}+ reports to appear.
