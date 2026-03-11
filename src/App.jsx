@@ -6,6 +6,8 @@ const ADMIN_PASSWORD = "capriq-kUssi0-ransij2";
 const MIN_SUBMISSIONS = 3;
 const MIN_SALARY = 20000;
 const MAX_SALARY = 500000;
+const MIN_HOURLY = 8;
+const MAX_HOURLY = 250;
 const RATE_LIMIT_KEY = "salarylens_last_submit";
 const RATE_LIMIT_MS = 24 * 60 * 60 * 1000;
 
@@ -15,7 +17,6 @@ const INDUSTRIES = [
   "Construction & Real Estate","Education","Retail & Trade","Marine & Shipping",
   "Accounting & Consulting","Media & Communications","Other",
 ];
-
 const EXPERIENCE_LEVELS = ["0–2 years","3–5 years","6–10 years","11–15 years","15+ years"];
 
 async function apiFetch(path, options = {}) {
@@ -35,18 +36,22 @@ async function apiFetch(path, options = {}) {
 }
 
 function fmtSalary(n) { return "$" + Math.round(n).toLocaleString(); }
+function fmtHourly(n) { return "$" + Number(n).toFixed(2) + "/hr"; }
 
-function Stats({ entries }) {
+function Stats({ entries, payType }) {
   if (!entries.length) return null;
-  const salaries = entries.map(e => e.salary);
-  const avg = salaries.reduce((a, b) => a + b, 0) / salaries.length;
+  const vals = entries.map(e => payType === "annual" ? e.salary : e.hourly_rate);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const fmt = payType === "annual" ? fmtSalary : fmtHourly;
   return (
     <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
       {[
         { label: "Submissions", val: entries.length, accent: false },
-        { label: "Average", val: fmtSalary(avg), accent: true },
-        { label: "Lowest", val: fmtSalary(Math.min(...salaries)), accent: false },
-        { label: "Highest", val: fmtSalary(Math.max(...salaries)), accent: false },
+        { label: "Average", val: fmt(avg), accent: true },
+        { label: "Lowest", val: fmt(min), accent: false },
+        { label: "Highest", val: fmt(max), accent: false },
       ].map(({ label, val, accent }) => (
         <div key={label} style={{ background: accent ? "#C9A84C" : "rgba(255,255,255,0.04)", border: accent ? "none" : "1px solid rgba(255,255,255,0.08)", borderRadius: "10px", padding: "1rem 1.4rem", minWidth: "120px", flex: "1" }}>
           <div style={{ fontSize: "0.7rem", letterSpacing: "0.12em", textTransform: "uppercase", color: accent ? "#3D2B00" : "#888", marginBottom: "0.3rem", fontFamily: "'DM Mono', monospace" }}>{label}</div>
@@ -62,15 +67,16 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState("browse");
+  const [payTab, setPayTab] = useState("annual");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [search, setSearch] = useState("");
   const [filterIndustry, setFilterIndustry] = useState("");
   const [filterExp, setFilterExp] = useState("");
-  const [filterMinSal, setFilterMinSal] = useState("");
-  const [filterMaxSal, setFilterMaxSal] = useState("");
-  const [form, setForm] = useState({ title: "", salary: "", industry: "", experience: "" });
+  const [filterMin, setFilterMin] = useState("");
+  const [filterMax, setFilterMax] = useState("");
+  const [form, setForm] = useState({ title: "", salary: "", hourly_rate: "", industry: "", experience: "", pay_type: "annual" });
   const [errors, setErrors] = useState({});
   const [flagging, setFlagging] = useState(null);
   const [flagged, setFlagged] = useState({});
@@ -86,14 +92,17 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(() => entries.filter(e => {
+  const filteredByTab = useMemo(() => entries.filter(e => (e.pay_type || "annual") === payTab), [entries, payTab]);
+
+  const filtered = useMemo(() => filteredByTab.filter(e => {
     if (search && !e.title.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterIndustry && e.industry !== filterIndustry) return false;
     if (filterExp && e.experience !== filterExp) return false;
-    if (filterMinSal && e.salary < Number(filterMinSal)) return false;
-    if (filterMaxSal && e.salary > Number(filterMaxSal)) return false;
+    const val = payTab === "annual" ? e.salary : e.hourly_rate;
+    if (filterMin && val < Number(filterMin)) return false;
+    if (filterMax && val > Number(filterMax)) return false;
     return true;
-  }), [entries, search, filterIndustry, filterExp, filterMinSal, filterMaxSal]);
+  }), [filteredByTab, search, filterIndustry, filterExp, filterMin, filterMax, payTab]);
 
   const grouped = useMemo(() => {
     const map = {};
@@ -102,76 +111,83 @@ export default function App() {
       if (!map[key]) map[key] = { title: e.title, entries: [] };
       map[key].entries.push(e);
     });
-    return Object.values(map)
-      .filter(g => g.entries.length >= MIN_SUBMISSIONS)
-      .sort((a, b) => b.entries.length - a.entries.length);
+    return Object.values(map).filter(g => g.entries.length >= MIN_SUBMISSIONS).sort((a, b) => b.entries.length - a.entries.length);
   }, [filtered]);
 
   const pendingCount = useMemo(() => {
     const map = {};
-    filtered.forEach(e => {
-      const key = e.title.toLowerCase().trim();
-      if (!map[key]) map[key] = 0;
-      map[key]++;
-    });
+    filtered.forEach(e => { const k = e.title.toLowerCase().trim(); map[k] = (map[k] || 0) + 1; });
     return Object.values(map).filter(c => c < MIN_SUBMISSIONS).reduce((a, b) => a + b, 0);
   }, [filtered]);
 
   function checkRateLimit() {
-    try {
-      const last = localStorage.getItem(RATE_LIMIT_KEY);
-      if (last && Date.now() - Number(last) < RATE_LIMIT_MS) return false;
-    } catch {}
+    try { const last = localStorage.getItem(RATE_LIMIT_KEY); if (last && Date.now() - Number(last) < RATE_LIMIT_MS) return false; } catch {}
     return true;
   }
+  function setRateLimit() { try { localStorage.setItem(RATE_LIMIT_KEY, String(Date.now())); } catch {} }
 
-  function setRateLimit() {
-    try { localStorage.setItem(RATE_LIMIT_KEY, String(Date.now())); } catch {}
+  async function checkBermuda() {
+    try {
+      const res = await fetch("https://ipapi.co/json/");
+      const data = await res.json();
+      return data.country_code === "BM";
+    } catch {
+      // If geolocation fails, allow submission (fail open)
+      return true;
+    }
   }
 
   async function handleSubmit() {
     const errs = {};
     if (!form.title.trim() || form.title.trim().length < 3) errs.title = "Must be at least 3 characters";
-    const sal = Number(form.salary);
-    if (!form.salary || isNaN(sal) || sal < MIN_SALARY || sal > MAX_SALARY)
-      errs.salary = `Enter a salary between ${fmtSalary(MIN_SALARY)} and ${fmtSalary(MAX_SALARY)}`;
+    if (form.pay_type === "annual") {
+      const sal = Number(form.salary);
+      if (!form.salary || isNaN(sal) || sal < MIN_SALARY || sal > MAX_SALARY)
+        errs.salary = `Enter a salary between ${fmtSalary(MIN_SALARY)} and ${fmtSalary(MAX_SALARY)}`;
+    } else {
+      const hr = Number(form.hourly_rate);
+      if (!form.hourly_rate || isNaN(hr) || hr < MIN_HOURLY || hr > MAX_HOURLY)
+        errs.hourly_rate = `Enter an hourly rate between ${fmtHourly(MIN_HOURLY)} and ${fmtHourly(MAX_HOURLY)}`;
+    }
     if (!form.industry) errs.industry = "Required";
     if (!form.experience) errs.experience = "Required";
     setErrors(errs);
     if (Object.keys(errs).length) return;
-
-    if (!checkRateLimit()) {
-      setSubmitError("You can only submit once every 24 hours. Thank you for contributing!");
-      return;
-    }
+    if (!checkRateLimit()) { setSubmitError("You can only submit once every 24 hours."); return; }
 
     setSubmitting(true);
+    const isBermuda = await checkBermuda();
+    if (!isBermuda) {
+      setSubmitError("Submissions are only open to people living or working in Bermuda. If you believe this is an error, try disabling your VPN.");
+      setSubmitting(false);
+      return;
+    }
     setSubmitError(null);
     try {
-      const result = await apiFetch("salaries", {
-        method: "POST",
-        body: JSON.stringify({ title: form.title.trim(), salary: sal, industry: form.industry, experience: form.experience, flagged: false }),
-      });
+      const payload = {
+        title: form.title.trim(),
+        industry: form.industry,
+        experience: form.experience,
+        pay_type: form.pay_type,
+        flagged: false,
+        salary: form.pay_type === "annual" ? Number(form.salary) : null,
+        hourly_rate: form.pay_type === "hourly" ? Number(form.hourly_rate) : null,
+      };
+      const result = await apiFetch("salaries", { method: "POST", body: JSON.stringify(payload) });
       const inserted = Array.isArray(result) ? result[0] : result;
       setEntries(prev => [inserted, ...prev]);
-      setForm({ title: "", salary: "", industry: "", experience: "" });
+      setForm({ title: "", salary: "", hourly_rate: "", industry: "", experience: "", pay_type: "annual" });
       setRateLimit();
       setSubmitted(true);
       setTimeout(() => { setSubmitted(false); setView("browse"); }, 2500);
-    } catch {
-      setSubmitError("Something went wrong. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
+    } catch { setSubmitError("Something went wrong. Please try again."); }
+    finally { setSubmitting(false); }
   }
 
   async function handleFlag(entryId) {
     setFlagging(entryId);
     try {
-      await apiFetch(`salaries?id=eq.${entryId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ flagged: true }),
-      });
+      await apiFetch(`salaries?id=eq.${entryId}`, { method: "PATCH", body: JSON.stringify({ flagged: true }) });
       setFlagged(prev => ({ ...prev, [entryId]: true }));
     } catch {}
     setFlagging(null);
@@ -209,13 +225,18 @@ export default function App() {
         .tab.active { background: #C9A84C; color: #1A1200; font-weight: 600; border-color: #C9A84C; }
         .tab:not(.active) { border-color: rgba(255,255,255,0.08); }
         .tab:not(.active):hover { color: #F5EDD6; border-color: rgba(255,255,255,0.15); }
+        .pay-toggle { display: flex; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 3px; gap: 3px; width: fit-content; margin-bottom: 1.5rem; }
+        .pay-btn { padding: 0.45rem 1.1rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.82rem; font-family: 'DM Mono', monospace; letter-spacing: 0.05em; transition: all 0.2s; }
+        .pay-btn.active { background: #C9A84C; color: #1A1200; font-weight: 700; }
+        .pay-btn:not(.active) { background: none; color: #666; }
+        .pay-btn:not(.active):hover { color: #F5EDD6; }
         .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 1.2rem 1.4rem; transition: border-color 0.2s; }
         .card:hover { border-color: rgba(201,168,76,0.3); }
         .field { display: flex; flex-direction: column; gap: 0.4rem; }
         .field label { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: #888; font-family: 'DM Mono', monospace; }
         .field input, .field select { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 0.65rem 0.9rem; color: #F5EDD6; font-size: 0.9rem; font-family: 'DM Sans', sans-serif; transition: border-color 0.2s; }
         .field input:focus, .field select:focus { border-color: #C9A84C; }
-        .field .err { font-size: 0.75rem; color: #E07070; margin-top: 0.1rem; }
+        .field .err { font-size: 0.75rem; color: #E07070; }
         .field input.has-err, .field select.has-err { border-color: #E07070; }
         .btn-gold { background: #C9A84C; color: #1A1200; border: none; border-radius: 8px; padding: 0.75rem 2rem; font-weight: 700; font-size: 0.9rem; cursor: pointer; letter-spacing: 0.04em; transition: background 0.2s, transform 0.1s; font-family: 'DM Sans', sans-serif; }
         .btn-gold:hover { background: #DDB95A; } .btn-gold:active { transform: scale(0.98); } .btn-gold:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -246,7 +267,7 @@ export default function App() {
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <button className={`tab${view === "browse" ? " active" : ""}`} onClick={() => setView("browse")}>Browse Data</button>
-          <button className={`tab${view === "submit" ? " active" : ""}`} onClick={() => { setView("submit"); setSubmitted(false); }}>+ Submit Salary</button>
+          <button className={`tab${view === "submit" ? " active" : ""}`} onClick={() => { setView("submit"); setSubmitted(false); }}>+ Submit</button>
           <button className={`tab${view === "admin" || view === "adminlogin" ? " active" : ""}`} onClick={() => setView(adminMode ? "admin" : "adminlogin")} style={{ fontSize: "0.75rem", opacity: 0.4 }}>⚙</button>
         </div>
       </div>
@@ -256,13 +277,20 @@ export default function App() {
         {/* BROWSE */}
         {view === "browse" && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.75rem", marginBottom: "1.5rem" }}>
+            {/* Pay type toggle */}
+            <div className="pay-toggle">
+              <button className={`pay-btn${payTab === "annual" ? " active" : ""}`} onClick={() => { setPayTab("annual"); setFilterMin(""); setFilterMax(""); }}>Annual Salary</button>
+              <button className={`pay-btn${payTab === "hourly" ? " active" : ""}`} onClick={() => { setPayTab("hourly"); setFilterMin(""); setFilterMax(""); }}>Hourly Pay</button>
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem", marginBottom: "1.5rem" }}>
               {[
                 { label: "Job Title", el: <input className="filter-input" placeholder="e.g. Accountant" value={search} onChange={e => setSearch(e.target.value)} /> },
                 { label: "Industry", el: <select className="filter-input" value={filterIndustry} onChange={e => setFilterIndustry(e.target.value)}><option value="">All Industries</option>{INDUSTRIES.map(i => <option key={i}>{i}</option>)}</select> },
                 { label: "Experience", el: <select className="filter-input" value={filterExp} onChange={e => setFilterExp(e.target.value)}><option value="">All Levels</option>{EXPERIENCE_LEVELS.map(l => <option key={l}>{l}</option>)}</select> },
-                { label: "Min Salary ($)", el: <input className="filter-input" placeholder="e.g. 50000" type="number" value={filterMinSal} onChange={e => setFilterMinSal(e.target.value)} /> },
-                { label: "Max Salary ($)", el: <input className="filter-input" placeholder="e.g. 120000" type="number" value={filterMaxSal} onChange={e => setFilterMaxSal(e.target.value)} /> },
+                { label: payTab === "annual" ? "Min Salary ($)" : "Min Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 50000" : "e.g. 20"} type="number" value={filterMin} onChange={e => setFilterMin(e.target.value)} /> },
+                { label: payTab === "annual" ? "Max Salary ($)" : "Max Rate ($/hr)", el: <input className="filter-input" placeholder={payTab === "annual" ? "e.g. 120000" : "e.g. 100"} type="number" value={filterMax} onChange={e => setFilterMax(e.target.value)} /> },
               ].map(({ label, el }) => (
                 <div key={label}>
                   <div style={{ fontSize: "0.68rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "#666", fontFamily: "'DM Mono', monospace", marginBottom: "0.35rem" }}>{label}</div>
@@ -272,65 +300,69 @@ export default function App() {
             </div>
 
             {loading ? <div style={{ textAlign: "center", padding: "4rem" }}><div className="spinner" /></div>
-              : loadError ? <div style={{ textAlign: "center", color: "#E07070", padding: "3rem", fontFamily: "'DM Mono', monospace", fontSize: "0.85rem" }}>{loadError}</div>
+              : loadError ? <div style={{ textAlign: "center", color: "#E07070", padding: "3rem", fontFamily: "'DM Mono', monospace" }}>{loadError}</div>
               : <>
-                <Stats entries={filtered} />
-                {pendingCount > 0 && (
-                  <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.15)", borderRadius: "8px", padding: "0.7rem 1rem", marginBottom: "1rem", fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>
-                    {pendingCount} submission{pendingCount !== 1 ? "s" : ""} waiting — roles need {MIN_SUBMISSIONS}+ reports to appear publicly.
-                  </div>
-                )}
-                {grouped.length === 0
-                  ? <div style={{ textAlign: "center", color: "#555", padding: "3rem", fontFamily: "'DM Mono', monospace", fontSize: "0.85rem" }}>
-                      {entries.length === 0 ? "No submissions yet. Be the first to share your salary!" : "No roles have enough submissions yet. Each role needs 3+ reports to appear."}
+                  <Stats entries={filtered} payType={payTab} />
+                  {pendingCount > 0 && (
+                    <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.15)", borderRadius: "8px", padding: "0.7rem 1rem", marginBottom: "1rem", fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>
+                      {pendingCount} submission{pendingCount !== 1 ? "s" : ""} waiting — roles need {MIN_SUBMISSIONS}+ reports to appear.
                     </div>
-                  : <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                      {grouped.map(({ title, entries: grp }) => {
-                        const sals = grp.map(e => e.salary);
-                        const avg = sals.reduce((a, b) => a + b, 0) / sals.length;
-                        const globalMax = Math.max(...entries.map(e => e.salary));
-                        return (
-                          <div key={title} className="card">
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.1rem", fontWeight: "700", marginBottom: "0.4rem" }}>{title}</div>
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
-                                  {[...new Set(grp.map(e => e.industry))].map(i => <span key={i} className="tag">{i}</span>)}
-                                  {[...new Set(grp.map(e => e.experience))].map(l => <span key={l} className="tag" style={{ background: "rgba(255,255,255,0.05)", color: "#888" }}>{l}</span>)}
-                                  <span className="tag" style={{ background: "rgba(255,255,255,0.05)", color: "#666" }}>{grp.length} reports</span>
-                                  <button className="btn-flag" onClick={() => setFlagging(title === flagging ? null : title)}>⚑ flag</button>
-                                </div>
-                                {flagging === title && (
-                                  <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                                    <div style={{ fontSize: "0.75rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>Flag a specific entry as suspicious:</div>
-                                    {grp.map(e => (
-                                      <div key={e.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.8rem", color: "#aaa" }}>
-                                        <span style={{ fontFamily: "'DM Mono', monospace" }}>{fmtSalary(e.salary)} · {e.experience}</span>
-                                        {flagged[e.id]
-                                          ? <span style={{ color: "#C9A84C", fontSize: "0.72rem" }}>✓ flagged</span>
-                                          : <button className="btn-flag" onClick={() => handleFlag(e.id)} disabled={flagging === e.id}>
-                                              {flagging === e.id ? "…" : "flag this"}
-                                            </button>}
-                                      </div>
-                                    ))}
+                  )}
+                  {grouped.length === 0
+                    ? <div style={{ textAlign: "center", color: "#555", padding: "3rem", fontFamily: "'DM Mono', monospace", fontSize: "0.85rem" }}>
+                        {filteredByTab.length === 0
+                          ? `No ${payTab} submissions yet. Be the first!`
+                          : `No roles have ${MIN_SUBMISSIONS}+ reports yet in this category.`}
+                      </div>
+                    : <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        {grouped.map(({ title, entries: grp }) => {
+                          const vals = grp.map(e => payTab === "annual" ? e.salary : e.hourly_rate);
+                          const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                          const min = Math.min(...vals);
+                          const max = Math.max(...vals);
+                          const allVals = filteredByTab.map(e => payTab === "annual" ? e.salary : e.hourly_rate);
+                          const globalMax = Math.max(...allVals);
+                          const fmt = payTab === "annual" ? fmtSalary : fmtHourly;
+                          return (
+                            <div key={title} className="card">
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.1rem", fontWeight: "700", marginBottom: "0.4rem" }}>{title}</div>
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
+                                    {[...new Set(grp.map(e => e.industry))].map(i => <span key={i} className="tag">{i}</span>)}
+                                    {[...new Set(grp.map(e => e.experience))].map(l => <span key={l} className="tag" style={{ background: "rgba(255,255,255,0.05)", color: "#888" }}>{l}</span>)}
+                                    <span className="tag" style={{ background: "rgba(255,255,255,0.05)", color: "#666" }}>{grp.length} reports</span>
+                                    <button className="btn-flag" onClick={() => setFlagging(flagging === title ? null : title)}>⚑ flag</button>
                                   </div>
-                                )}
-                                <div className="bar" style={{ maxWidth: "260px", marginTop: "0.75rem" }}>
-                                  <div className="bar-fill" style={{ width: `${(avg / globalMax) * 100}%` }} />
+                                  {flagging === title && (
+                                    <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                                      <div style={{ fontSize: "0.75rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>Flag a specific entry:</div>
+                                      {grp.map(e => (
+                                        <div key={e.id} style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.8rem", color: "#aaa" }}>
+                                          <span style={{ fontFamily: "'DM Mono', monospace" }}>{fmt(payTab === "annual" ? e.salary : e.hourly_rate)} · {e.experience}</span>
+                                          {flagged[e.id]
+                                            ? <span style={{ color: "#C9A84C", fontSize: "0.72rem" }}>✓ flagged</span>
+                                            : <button className="btn-flag" onClick={() => handleFlag(e.id)}>flag this</button>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="bar" style={{ maxWidth: "260px", marginTop: "0.75rem" }}>
+                                    <div className="bar-fill" style={{ width: `${(avg / globalMax) * 100}%` }} />
+                                  </div>
                                 </div>
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: "700", color: "#C9A84C" }}>{fmtSalary(avg)}</div>
-                                <div style={{ fontSize: "0.72rem", color: "#666", fontFamily: "'DM Mono', monospace", marginTop: "0.2rem" }}>{fmtSalary(Math.min(...sals))} – {fmtSalary(Math.max(...sals))}</div>
-                                <div style={{ fontSize: "0.65rem", color: "#555", fontFamily: "'DM Mono', monospace" }}>avg · range</div>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: "700", color: "#C9A84C" }}>{fmt(avg)}</div>
+                                  <div style={{ fontSize: "0.72rem", color: "#666", fontFamily: "'DM Mono', monospace", marginTop: "0.2rem" }}>{fmt(min)} – {fmt(max)}</div>
+                                  <div style={{ fontSize: "0.65rem", color: "#555", fontFamily: "'DM Mono', monospace" }}>avg · range</div>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                }
-              </>
+                          );
+                        })}
+                      </div>
+                  }
+                </>
             }
           </>
         )}
@@ -339,8 +371,8 @@ export default function App() {
         {view === "submit" && (
           <div style={{ maxWidth: "500px", margin: "0 auto" }}>
             <div style={{ marginBottom: "2rem" }}>
-              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: "700", marginBottom: "0.4rem" }}>Share Your Salary</h2>
-              <p style={{ color: "#666", fontSize: "0.85rem", lineHeight: 1.6 }}>All submissions are completely anonymous. No account, no tracking — just helping your fellow Bermudians get paid fairly.</p>
+              <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.5rem", fontWeight: "700", marginBottom: "0.4rem" }}>Share Your Pay</h2>
+              <p style={{ color: "#666", fontSize: "0.85rem", lineHeight: 1.6 }}>All submissions are completely anonymous. No account, no tracking — just helping Bermudians get paid fairly.</p>
             </div>
             {submitted
               ? <div style={{ textAlign: "center", padding: "3rem", background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.3)", borderRadius: "12px" }}>
@@ -349,16 +381,34 @@ export default function App() {
                   <div style={{ fontSize: "0.82rem", color: "#888", marginTop: "0.4rem" }}>Your submission has been added.</div>
                 </div>
               : <div style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
+                  {/* Pay type toggle in form */}
+                  <div>
+                    <div style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "#888", fontFamily: "'DM Mono', monospace", marginBottom: "0.5rem" }}>Pay Type</div>
+                    <div className="pay-toggle">
+                      <button className={`pay-btn${form.pay_type === "annual" ? " active" : ""}`} onClick={() => setForm({ ...form, pay_type: "annual" })}>Annual Salary</button>
+                      <button className={`pay-btn${form.pay_type === "hourly" ? " active" : ""}`} onClick={() => setForm({ ...form, pay_type: "hourly" })}>Hourly Pay</button>
+                    </div>
+                  </div>
+
                   <div className="field">
                     <label>Job Title</label>
                     <input {...inp("title")} className={errors.title ? "has-err" : ""} placeholder="e.g. Software Engineer" />
                     {errors.title && <span className="err">{errors.title}</span>}
                   </div>
-                  <div className="field">
-                    <label>Annual Salary (BMD / USD)</label>
-                    <input {...inp("salary")} className={errors.salary ? "has-err" : ""} type="number" placeholder={`${MIN_SALARY.toLocaleString()} – ${MAX_SALARY.toLocaleString()}`} />
-                    {errors.salary && <span className="err">{errors.salary}</span>}
-                  </div>
+
+                  {form.pay_type === "annual"
+                    ? <div className="field">
+                        <label>Annual Salary (BMD / USD)</label>
+                        <input {...inp("salary")} className={errors.salary ? "has-err" : ""} type="number" placeholder="e.g. 85000" />
+                        {errors.salary && <span className="err">{errors.salary}</span>}
+                      </div>
+                    : <div className="field">
+                        <label>Hourly Rate (BMD / USD)</label>
+                        <input {...inp("hourly_rate")} className={errors.hourly_rate ? "has-err" : ""} type="number" placeholder="e.g. 25.00" step="0.01" />
+                        {errors.hourly_rate && <span className="err">{errors.hourly_rate}</span>}
+                      </div>
+                  }
+
                   <div className="field">
                     <label>Industry / Sector</label>
                     <select {...inp("industry")} className={errors.industry ? "has-err" : ""}>
@@ -404,14 +454,10 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
               <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.4rem", fontWeight: "700" }}>Admin Dashboard</h2>
-              <button className="tab" onClick={() => { setAdminMode(false); setView("browse"); }} style={{ fontSize: "0.75rem" }}>Sign Out</button>
+              <button className="tab" onClick={() => { setAdminMode(false); setView("browse"); }}>Sign Out</button>
             </div>
-
-            {/* Flagged entries */}
             <div style={{ marginBottom: "2rem" }}>
-              <div style={{ fontSize: "0.72rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C9A84C", fontFamily: "'DM Mono', monospace", marginBottom: "0.75rem" }}>
-                Flagged Entries ({flaggedEntries.length})
-              </div>
+              <div style={{ fontSize: "0.72rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C9A84C", fontFamily: "'DM Mono', monospace", marginBottom: "0.75rem" }}>Flagged Entries ({flaggedEntries.length})</div>
               {flaggedEntries.length === 0
                 ? <div style={{ color: "#555", fontSize: "0.85rem", fontFamily: "'DM Mono', monospace" }}>No flagged entries.</div>
                 : flaggedEntries.map(e => (
@@ -419,32 +465,28 @@ export default function App() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
                         <div>
                           <div style={{ fontWeight: "600", marginBottom: "0.2rem" }}>{e.title}</div>
-                          <div style={{ fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>{fmtSalary(e.salary)} · {e.industry} · {e.experience}</div>
+                          <div style={{ fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>
+                            {e.pay_type === "hourly" ? fmtHourly(e.hourly_rate) : fmtSalary(e.salary)} · {e.industry} · {e.experience} · {e.pay_type}
+                          </div>
                         </div>
-                        <button className="btn-red" onClick={() => handleDelete(e.id)} disabled={deleting === e.id}>
-                          {deleting === e.id ? "Deleting…" : "Delete"}
-                        </button>
+                        <button className="btn-red" onClick={() => handleDelete(e.id)} disabled={deleting === e.id}>{deleting === e.id ? "…" : "Delete"}</button>
                       </div>
                     </div>
                   ))
               }
             </div>
-
-            {/* All entries */}
             <div>
-              <div style={{ fontSize: "0.72rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", fontFamily: "'DM Mono', monospace", marginBottom: "0.75rem" }}>
-                All Entries ({entries.length})
-              </div>
+              <div style={{ fontSize: "0.72rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", fontFamily: "'DM Mono', monospace", marginBottom: "0.75rem" }}>All Entries ({entries.length})</div>
               {entries.map(e => (
                 <div key={e.id} className="card" style={{ marginBottom: "0.5rem" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
                     <div>
                       <div style={{ fontWeight: "600", marginBottom: "0.2rem" }}>{e.title} {e.flagged && <span style={{ color: "#E09050", fontSize: "0.72rem", fontFamily: "'DM Mono', monospace" }}>⚑ flagged</span>}</div>
-                      <div style={{ fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>{fmtSalary(e.salary)} · {e.industry} · {e.experience}</div>
+                      <div style={{ fontSize: "0.78rem", color: "#888", fontFamily: "'DM Mono', monospace" }}>
+                        {e.pay_type === "hourly" ? fmtHourly(e.hourly_rate) : fmtSalary(e.salary)} · {e.industry} · {e.experience} · {e.pay_type || "annual"}
+                      </div>
                     </div>
-                    <button className="btn-red" onClick={() => handleDelete(e.id)} disabled={deleting === e.id}>
-                      {deleting === e.id ? "…" : "Delete"}
-                    </button>
+                    <button className="btn-red" onClick={() => handleDelete(e.id)} disabled={deleting === e.id}>{deleting === e.id ? "…" : "Delete"}</button>
                   </div>
                 </div>
               ))}
