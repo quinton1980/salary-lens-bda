@@ -66,7 +66,7 @@ export default function App() {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [view, setView] = useState("browse");
+  const [view, setView] = useState("submit");
   const [payTab, setPayTab] = useState("annual");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
