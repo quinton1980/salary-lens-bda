@@ -272,6 +272,12 @@ export default function App() {
         </div>
       </div>
 
+      {/* Share banner */}
+      <div style={{ background: "rgba(201,168,76,0.08)", borderBottom: "1px solid rgba(201,168,76,0.15)", padding: "0.6rem 2rem", textAlign: "center", fontSize: "0.8rem", color: "#C9A84C", fontFamily: "'DM Mono', monospace", letterSpacing: "0.04em" }}>
+        Help grow the database — share with colleagues and friends&nbsp;
+        <a href="https://salary-lens-bda2.vercel.app" target="_blank" rel="noopener noreferrer" style={{ color: "#E8C96A", textDecoration: "underline" }}>salary-lens-bda2.vercel.app</a>
+      </div>
+
       <div style={{ maxWidth: "900px", margin: "0 auto", padding: "2rem 1.5rem" }}>
 
         {/* BROWSE */}
