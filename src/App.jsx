@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 const SUPABASE_URL = "https://pxrqrmyvmbzxbxhuxqtx.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4cnFybXl2bWJ6eGJ4aHV4cXR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxODE3MzIsImV4cCI6MjA4ODc1NzczMn0.fdWm-2QhZAbBHlSQPFi5rUCd1SxXYAlr-UFIukPFtsY";
 const ADMIN_PASSWORD = "capriq-kUssi0-ransij2";
-const MIN_SUBMISSIONS = 3;
+const MIN_SUBMISSIONS = 1;
 const MIN_SALARY = 20000;
 const MAX_SALARY = 500000;
 const MIN_HOURLY = 8;
